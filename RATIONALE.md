@@ -206,3 +206,42 @@ functions a symlink, the files to which they point are overwritten but not
 removed. If two or more arguments are passed into these functions, only the
 first one is considered, the rest are silently ignored.
 
+One can write something like this:
+
+    enc() {
+        if [ "$#" -ne 1 ]; then
+            printf "%s\n" "Expected exactly one argument"
+            return 1
+        elif [ ! -f "$1" ]; then
+            if [ -e "$1" ]; then
+                printf "%s\n" "$1 doesn't exist"
+            else
+                printf "%s\n" "$1 is not a plain file"
+            fi
+            return 1
+        fi 1>&2
+        gpg --armor --symmetric --output "$1".gpg "$1" && shred -uz "$1"
+    }
+    dec() {
+        if [ "$#" -ne 1 ]; then
+            printf "%s\n" "Expected exactly one argument"
+            return 1
+        elif [ ! -f "$1" ]; then
+            if [ -e "$1" ]; then
+                printf "%s\n" "$1 doesn't exist"
+            else
+                printf "%s\n" "$1 is not a plain file"
+            fi
+            return 1
+        elif [ "${1%.gpg}".gpg != "$1" ]; then
+            printf "%s\n" "$1 doesn't have extension .gpg"
+            return 1
+        fi 1>&2
+        gpg --decrypt --output "${1%.gpg}" "$1" && shred -uz "$1"
+    }
+
+Some parts of it can be slightly improved, but the overall mass of this
+structure is overwhelming. Oftentimes the cost of supporting a number of long
+functions outweighs the benefits of code abstraction, forcing users to stick to
+only the simplest substitutions in most cases.
+
