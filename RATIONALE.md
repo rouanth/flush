@@ -70,14 +70,16 @@ What's much worse is syntax that seems very similar but has different meaning.
 For this one, let's look at a real task: how does one save the visual bell
 character in a variable?
 
-    $a=\a           # '=a: command not found'
-    a=\a            # Doesn't work, saves string 'a' instead.
-    a="\a"          # Doesn't work, saves literal string '\a'.
-    a=`printf \a`   # Doesn't work, saves 'a' again.
-    a=`printf "\a"` # Works.
-    a=`printf \\\a` # Also works.
-    a=$(printf \\a) # Works, too.
-    a=(printf \\a)  # Unspecified.
+    $a=\a            # '=a: command not found'
+    a=\a             # Doesn't work, saves string 'a' instead.
+    a="\a"           # Doesn't work, saves literal string '\a'.
+    a=`printf \a`    # Doesn't work, saves 'a' again.
+    a=`printf "\a"`  # Works.
+    a =`printf "\a"` # Doesn't work (runs command `a`)
+    a= `printf "\a"` # Doesn't work (runs command `\a` with `a` set to "")
+    a=`printf \\\a`  # Also works.
+    a=$(printf \\a)  # Works, too.
+    a=(printf \\a)   # Unspecified.
 
 Even with this tiny example, it is difficult to predict the behaviour of the
 program. And the syntax elements demonstrated by these commands isn't even an
