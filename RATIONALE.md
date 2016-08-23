@@ -31,15 +31,13 @@ We believe that there exists the Haskell of shells, a language with few core
 concepts but much freedom in combining them. Our goal is to find, document, and
 implement it.
 
-Failures of existing shells
----------------------------
-
-### `sh`
+Failures of `sh`
+----------------
 
 The standard shell as specified by the POSIX has multiple issues that can't be
 addressed without a complete rewrite.
 
-#### Its syntax is cryptic
+### Its syntax is cryptic
 
 Here are three different commands:
 
@@ -90,9 +88,9 @@ There are many constructs with little semantics to distinguish between them.
 Understanding how the command strings are evaluated certainly helps, but even
 then there are some corner cases that are hard to remember.
 
-#### Redirection is uncomfortable
+### Redirection is uncomfortable
 
-##### Pipes with source other than the standard output
+#### Pipes with source other than the standard output
 
 One can't pipe the standard error stream to a program. Pipes only work on
 standard output.
@@ -119,12 +117,12 @@ have to resort to this:
 The whole expression can probably qualify for “cryptic syntax” (see above). It
 is uncommon to meet a man who instantaneously grasps what this code does.
 
-##### Connecting two commands at both ends
+#### Connecting two commands at both ends
 
 Let's say we have a program `rename` which accepts a rule for how to transform
 filenames and a list of files to rename according to that rule. We'll describe
 multiple possible solutions later, in discussion of a general lack of
-higher-order functions, but there is a particular one that's worth mentioning
+first-class functions, but there is a particular one that's worth mentioning
 here.
 
 `rename` can write to stream `3` and read the result from stream `4`. The
@@ -133,17 +131,26 @@ ends, including pipes in subshells.
 
 Now, how _do_ we redirect?
 
-The only solution we've found is to use named pipes:
+One solution we've found is to use named pipes:
 
     mkfifo o3 i4
     transform < o3 > i4 & rename 3> o3 4< i4 
     rm o3 i4
 
+One can do with a single pipe, too, simultaneously avoiding putting the process
+in the background, but at the cost of rendering the command unreadable:
+
+    mkfifo i4
+    (rename 1>&5 3>&1 4< i4 | transform > i4) 5>&1
+    rm i4
+
 If `rename` is a shell script, implementing its relationships with the third
 and fourth streams is also not an easy task. A script which simply pipes its
 argument if it's placed in this system instead of `rename` may look like this:
 
-    printf "%s" "$1" 1>&3 & exec 3>&-; cat <&4
+    printf "%s" "$1" 1>&3
+    exec 3>&-
+    cat <&4
 
 If the `exec` is omitted, `transform` can await the input which never comes if
 it doesn't close its `stdin` first. Most filters don't close their `stdin`
@@ -151,4 +158,51 @@ during normal operation.
 
 These abstraction are quite low-level, and even simple tasks which don't have
 some syntactic support will lead to code that looks like Cthulhu.
+
+### Code encapsulation is bothersome
+
+Let's say we are concerned with privacy and want to encrypt and decrypt some
+sensitive files on a regular basis with these commands:
+
+    gpg -aco "$file".gpg "$file" && shred -uz "$file"
+    gpg  -do "$file" "$file".gpg && shred -uz "$file".gpg
+
+It seems natural to avoid typing all this every time and instead have something
+like this:
+
+    enc "$file"
+    dec "$file".gpg
+
+#### Aliases are just string substitutions
+
+Aliases aren't sufficient for this task. The best we can do is
+
+    alias enc="gpg -ac"
+    alias dec="gpg -d"
+
+The reason is that aliases don't accept arguments. The best they can do is
+substitute some string at the beginning of a command with another string. They
+have their uses:
+
+    alias ls="ls --color --classify -C"
+
+For anything even slightly more complex, one has to define a function.
+
+#### Functions require manual checks
+
+Functions in `sh` are really plain. They accept a list of arguments, initialize
+structures for access to them, and execute a sequence of commands.
+
+Let's try to use the naive approach:
+
+    enc() { gpg -aco "$1".gpg "$1"    && shred -uz "$1"; }
+    dec() { gpg -do  "${1%.gpg}" "$1" && shred -uz "$1"; }
+
+These functions make several dangerous assumptions. For example, if an
+encrypted file doesn't have the `.gpg` extension, `dec` removes it altogether.
+And if no arguments are passed into the functions, the errors aren't really
+helpful for someone who doesn't know what's going on. Or if you pass these
+functions a symlink, the files to which they point are overwritten but not
+removed. If two or more arguments are passed into these functions, only the
+first one is considered, the rest are silently ignored.
 
