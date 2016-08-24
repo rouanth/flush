@@ -159,7 +159,12 @@ during normal operation.
 These abstraction are quite low-level, and even simple tasks which don't have
 some syntactic support will lead to code that looks like Cthulhu.
 
-### Code encapsulation is bothersome
+### Code abstraction is bothersome
+
+`sh` requires one to perform many operations by hand, and so some mechanisms of
+separating the concepts that are used often would be helpful. And there are
+some, but using them is more often than not is harder than typing everything by
+hand each time.
 
 Let's say we are concerned with privacy and want to encrypt and decrypt some
 sensitive files on a regular basis with these commands:
@@ -226,7 +231,7 @@ One can write something like this:
         if [ "$#" -ne 1 ]; then
             printf "%s\n" "Expected exactly one argument"
             return 1
-        elif [ ! -f "$1" ]; then
+        elif [ ! -f "$1" -o -L "$1" ]; then
             if [ -e "$1" ]; then
                 printf "%s\n" "$1 doesn't exist"
             else
@@ -234,7 +239,7 @@ One can write something like this:
             fi
             return 1
         elif [ "${1%.gpg}".gpg != "$1" ]; then
-            printf "%s\n" "$1 doesn't have extension .gpg"
+            printf "%s\n" "$1 doesn't have the extension .gpg"
             return 1
         fi 1>&2
         gpg --decrypt --output "${1%.gpg}" "$1" && shred -uz "$1"
@@ -244,4 +249,110 @@ Some parts of it can be slightly improved, but the overall mass of this
 structure is overwhelming. Oftentimes the cost of supporting a number of long
 functions outweighs the benefits of code abstraction, forcing users to stick to
 only the simplest substitutions in most cases.
+
+Of course, there always are some possibilities for abstraction. For example,
+one could write
+
+    _is_1_and_plain() {
+        if [ "$#" -ne 1 ]; then
+            printf "%s\n" "Expected exactly one argument"
+            return 1
+        elif [ ! -f "$1" -o -L "$1" ]; then
+            if [ -e "$1" ]; then
+                printf "%s\n" "$1 doesn't exist"
+            else
+                printf "%s\n" "$1 is not a plain file"
+            fi
+            return 1
+        fi 1>&2
+    }
+    _has_extension() {
+        if [ "${1%.$2}".$2 != "$1" ]; then
+            printf "%s\n" "$1 doesn't have the extension .$2"
+            return 1
+        fi 1>&2
+    }
+    enc() {
+        _is_1_and_plain "$@" &&
+            gpg --armor --symmetric --output "$1".gpg "$1" && shred -uz "$1"
+    }
+    dec() {
+        _is_1_and_plain "$@" && _has_extension "$1" gpg &&
+            gpg --decrypt --output "${1%.gpg}" "$1" && shred -uz "$1"
+    }
+
+The problem is that it's unlikely that many functions shall require a single
+argument with a particular extension, and so the benefits of abstracting the
+code aren't substantial.
+
+#### First-class function support is really bad
+
+First-class functions are a really natural concept of abstracting common data
+manipulation paradigms. The core idea is telling one function which other
+function to call. For example, `find -exec` and `xargs` both accept as
+parameters the names of programs to be run, and so they can be considered
+higher-order functions.
+
+But what about passing compound commands to a program? This can be done, too,
+by first creating a file containing the commands, and then passing that.
+
+    echo 'grep TODO "$1" | wc -l' > count_todo.sh
+    chmod +x count_todo.sh
+    find . -name "*.sh" -print -exec "$(pwd)/count_todo.sh" '{}' ';'
+
+In the discussion of bad piping facilities we've mentioned that one can create
+higher-order functions with pipes, but this only works feasibly in cases when
+one invocation of the function being passed is enough. In this example, the
+whole pipe must be run anew for every discovered file. We don't know of any
+general solution for this problem.
+
+Of course, one could also call `sh -c` which solves most of the problems shell
+users can have.
+
+    find . -name "*.sh" -print -exec sh -c "grep TODO '{}' | wc -l" ';'
+
+The main problem with this approach is having another layer of expansions and
+substitutions. Where will this variable expand, in this shell or in the inner
+one? How much backslashes must one put to have a literal backslash in the `sed`
+expression written between single quotes in the string wrapped in double quotes
+and used as argument to `sh -c` which is itself inside backticks? Not an easy
+question but, unluckily, one that isn't of pure academic interest and arises in
+day-to-day use. Usually the answer is trying everything on simple examples and
+praying that larger ones won't cause some hidden aspect of complexity to
+emerge. We've observed that the amount of time needed to debug a shell command
+is in exponential relation with the number of layers in it, and each `sh -c` or
+`eval` opens up a great number of them.
+
+It should be noted that the difficulty of passing functions to programs must
+be primarily attributed to the lack of corresponding call conventions. Shell
+shouldn't invent its own form of passing arguments to programs. But even where
+the shell itself is concerned, the situation isn't much more bright.
+
+It is true that one is able to avoid writing compound expressions to a file,
+defining a function instead:
+
+    count_todo() { grep TODO "$1" | wc -l; }
+    ls_with_op() {
+        for i in `ls`; do "$@" "$i"; done
+        # don't do "for i in `ls`" at home!
+    }
+    ls_with_op echo
+    ls_with_op count_todo
+    ls_with_op mv -t ~
+    ls_with_op { echo "$1" } # Fails
+
+But one can't pass anonymous functions. There is no option to simply write
+
+    ls_with_op (mv -vi "$1" $(printf "%s" "$1" | sed "s/^0//g"))
+
+The transformation described here is simple and common: renaming multiple
+files at the same time according to some rule, here it removing leading zero
+from the name.
+
+There are many ways to express this concept. One possible workaround is
+
+    ls -1 | sed 's/^0\(.*\)/0\1\x0\1\x0/' | tr -d '\n' | xargs -0 -n2 mv
+
+And `xargs` often does save the day, but not often enough. And look at this
+line!
 
