@@ -358,3 +358,60 @@ There are many ways to express this concept. One possible workaround is
 And `xargs` often does save the day, but not often enough. And look at this
 line!
 
+### Environment is implicitly passed
+
+There are many settings which it's reasonable to define globally. For example,
+passing the language in which error messages should be displayed is extremely
+cumbersome, and each and every program that calls other programs would have to
+remember to pass this option everywhere. And it's bad enough with one option,
+but they are numerous!
+
+  * Language of the messages;
+  * List of directories in which to look for executable files (in order to be
+    able to type `cat` instead of `/bin/cat`);
+  * Address of the X11 server;
+  * Type of the terminal;
+  * Name of the default editor and Internet browser;
+  * Many-many others.
+
+Storing these settings in per-user configuration files isn't viable: often we
+need to be able to modify these variables for a specific program at a specific
+point of time. For example, one could see error messages in one language, and
+then, failing to identify the problem, switch to English in order to search the
+Internet for a solution. Another example is scripts that runs programs which
+aren't really useful elsewhere, so users don't want these programs to appear in
+their auto-completion but it's reasonable for script to be able to address the
+programs by the full names.
+
+The present solution for this problem is environment. An environment of a
+process is a set of key-value pairs which can be modified by the process and
+is inherited by the processes called by it. So we may just call
+
+    LANG=en_US.UTF8 sh
+
+and all the programs that are called from this shells shall be able to query
+the value of `$LANG` and, if they support this variable, output their messages
+in English.
+
+However, there is a major problem associated with this. Environment is just
+*too* transparent. It adds a new level of indirection in program runtime but
+isn't explicitly registered anywhere. If a session was closed, there is no way
+to know with which environment has that line of `sh` history been executed, and
+way too often users don't bother with checking the output of `env` after
+encountering a bug in a program.
+
+The result is a plethora of bugs that occur only when a specific set of
+environment variables has specific values because, contrary to testing with
+wrong values in program arguments or standard input, testing with wrong
+environment variables is just too hard: one has to remember that the
+environment is inherited by the child programs and which environment settings
+have which effect in them. Command-line parameters, on the other hand, are
+explicitly set by the programmer while implementing the calling behaviour,
+hence it's impossible to disregard them.
+
+It's true that when software doesn't work properly a specific, magical, set of
+environment variables may cause it to produce the desired results. But it is
+the case of flexibility at the expense of robustness: the astonishing amount of
+hidden behaviour which surfaces once you've set some environment variables
+makes determining the cause and effect quite painful.
+
